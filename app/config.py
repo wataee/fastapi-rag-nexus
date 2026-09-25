@@ -5,7 +5,7 @@ from pydantic import Field
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "FastAPI RAG Nexus Engine"
+    PROJECT_NAME: str = "StreamRAG Gateway Engine"
     VERSION: str = "2.0.0"
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Server & Security
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    SECRET_KEY: str = "nexus-super-secret-jwt-key-2026-production-ready"
+    SECRET_KEY: str = "streamrag-super-secret-jwt-key-2026-production-ready"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
     CORS_ORIGINS: List[str] = ["*"]
@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     DB_PORT: int = Field(default=5432, alias="DB_PORT")
     DB_USER: str = Field(default="postgres", alias="DB_USER")
     DB_PASS: str = Field(default="postgres", alias="DB_PASS")
-    DB_NAME: str = Field(default="nexus_rag_db", alias="DB_NAME")
-    COLLECTION_NAME: str = "nexus_knowledge_docs"
+    DB_NAME: str = Field(default="streamrag_db", alias="DB_NAME")
+    COLLECTION_NAME: str = "streamrag_knowledge_docs"
 
     # Redis
     REDIS_HOST: str = Field(default="localhost", alias="REDIS_HOST")

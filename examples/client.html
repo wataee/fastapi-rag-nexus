@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StreamRAG — Interactive Real-Time SSE Client</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(30, 41, 59, 0.7);
+      --border: #334155;
+      --primary: #6366f1;
+      --accent: #10b981;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; padding: 24px; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 20px; }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 20px; }
+    .badge { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid var(--primary); padding: 4px 10px; border-radius: 999px; font-size: 11px; }
+    .metrics-bar { display: flex; gap: 16px; font-size: 12px; color: var(--text-muted); }
+    .metric { background: #1e293b; padding: 6px 12px; border-radius: 6px; border: 1px solid #475569; }
+    .metric span { color: var(--accent); font-weight: 600; }
+    #chat-container { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card-bg); margin-bottom: 20px; }
+    .message { max-width: 80%; padding: 14px 18px; border-radius: 12px; line-height: 1.5; font-size: 14px; word-break: break-word; }
+    .message.user { align-self: flex-end; background: #312e81; color: #ffffff; }
+    .message.assistant { align-self: flex-start; background: #0f172a; border: 1px solid var(--border); }
+    .citations { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .citation-pill { background: rgba(16, 185, 129, 0.15); border: 1px solid var(--accent); color: #6ee7b7; font-size: 11px; padding: 3px 8px; border-radius: 4px; }
+    .typing-caret { display: inline-block; width: 6px; height: 16px; background: var(--primary); animation: blink 1s infinite; vertical-align: middle; margin-left: 4px; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+    form { display: flex; gap: 12px; }
+    input[type="text"] { flex: 1; padding: 12px 16px; background: #0f172a; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; outline: none; }
+    input[type="text"]:focus { border-color: var(--primary); }
+    button { padding: 12px 24px; background: var(--primary); border: none; border-radius: 8px; color: #fff; font-weight: 600; cursor: pointer; transition: 0.2s; }
+    button:hover { background: #4f46e5; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span>⚡ StreamRAG</span>
+      <span class="badge">SSE Live Streaming</span>
+    </div>
+    <div class="metrics-bar">
+      <div class="metric">TTFT: <span id="metric-ttft">—</span></div>
+      <div class="metric">Tokens: <span id="metric-tokens">0</span></div>
+      <div class="metric">Speed: <span id="metric-speed">— tok/s</span></div>
+    </div>
+  </header>
+
+  <div id="chat-container">
+    <div class="message assistant">
+      👋 Welcome to <strong>StreamRAG</strong>! Ask anything against the indexed knowledge base to experience sub-350ms token streaming.
+    </div>
+  </div>
+
+  <form id="chat-form">
+    <input type="text" id="user-input" placeholder="Type your query (e.g. 'How does hybrid reciprocal rank fusion work?')..." required autocomplete="off"/>
+    <button type="submit" id="send-btn">Stream Answer ↵</button>
+  </form>
+
+  <script>
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("user-input");
+    const container = document.getElementById("chat-container");
+    const ttftEl = document.getElementById("metric-ttft");
+    const tokensEl = document.getElementById("metric-tokens");
+    const speedEl = document.getElementById("metric-speed");
+    let sessionId = "session_" + Math.random().toString(36).substring(2, 9);
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const prompt = input.value.trim();
+      if (!prompt) return;
+      input.value = "";
+
+      // Append User Message
+      const userDiv = document.createElement("div");
+      userDiv.className = "message user";
+      userDiv.textContent = prompt;
+      container.appendChild(userDiv);
+
+      // Append Assistant Message placeholder
+      const asstDiv = document.createElement("div");
+      asstDiv.className = "message assistant";
+      const textSpan = document.createElement("span");
+      const caret = document.createElement("span");
+      caret.className = "typing-caret";
+      const citationsDiv = document.createElement("div");
+      citationsDiv.className = "citations";
+
+      asstDiv.appendChild(textSpan);
+      asstDiv.appendChild(caret);
+      asstDiv.appendChild(citationsDiv);
+      container.appendChild(asstDiv);
+      container.scrollTop = container.scrollHeight;
+
+      // Telemetry
+      const startTime = performance.now();
+      let firstTokenTime = null;
+      let tokenCount = 0;
+
+      try {
+        const response = await fetch("http://localhost:8000/api/v1/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: prompt, session_id: sessionId, top_k: 4 })
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop(); // keep partial
+
+          for (const chunk of lines) {
+            const linesInChunk = chunk.split("\n");
+            let event = "message";
+            let data = "";
+
+            for (const l of linesInChunk) {
+              if (l.startsWith("event: ")) event = l.substring(7).trim();
+              if (l.startsWith("data: ")) data = l.substring(6).trim();
+            }
+
+            if (event === "citation" && data) {
+              const cit = JSON.parse(data);
+              const pill = document.createElement("div");
+              pill.className = "citation-pill";
+              pill.textContent = `📄 ${cit.title} (${Math.round(cit.similarity * 100)}%)`;
+              citationsDiv.appendChild(pill);
+            } else if (event === "token" && data) {
+              if (!firstTokenTime) {
+                firstTokenTime = performance.now();
+                const ttft = Math.round(firstTokenTime - startTime);
+                ttftEl.textContent = `${ttft} ms`;
+              }
+              const payload = JSON.parse(data);
+              textSpan.textContent += payload.content;
+              tokenCount++;
+              tokensEl.textContent = tokenCount;
+              const elapsed = (performance.now() - firstTokenTime) / 1000;
+              if (elapsed > 0) speedEl.textContent = `${Math.round(tokenCount / elapsed)} tok/s`;
+              container.scrollTop = container.scrollHeight;
+            } else if (event === "done") {
+              break;
+            }
+          }
+        }
+      } catch (err) {
+        textSpan.textContent += `\n[Error: ${err.message}]`;
+      } finally {
+        caret.remove();
+      }
+    });
+  </script>
+</body>
+</html>

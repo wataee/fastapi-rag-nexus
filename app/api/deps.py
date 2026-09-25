@@ -8,7 +8,7 @@ from app.schemas.user import UserOut
 async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> UserOut:
     if not token:
         # Default fallback to pre-seeded admin user for public demo / quick testing
-        admin = user_crud.get_by_email("admin@nexus.ai")
+        admin = user_crud.get_by_email("admin@streamrag.dev")
         if admin:
             return UserOut(**admin)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
